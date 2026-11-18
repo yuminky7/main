@@ -43,7 +43,8 @@ SYSTEM_PROMPT = f"""あなたは製薬会社の営業日報を読み、皮膚科
 - evidence: 判断の根拠にした文を、日報から1文単位で原文のまま引用する。患者の話題の文は引用しない。
 """
 
-PATIENT = re.compile(r"患者さん(で|から)")
+# 個別の患者の話題らしい文。広めに取り、疑わしい文は根拠に使わせない
+PATIENT = re.compile(r"患者さん(で|から|が)|\d+\s*(歳|代)|(男性|女性|お子さん|方)が.*(改善|悪化|使用|投与)")
 
 
 class ExtractionError(ValueError):
@@ -67,11 +68,14 @@ def clean_json(raw: str) -> str:
 
 def check_evidence(signal: DoctorSignal, text: str) -> None:
     """根拠が日報の文そのもので、患者の話題の文を含まないことを確かめる。"""
-    sentences = {x + "。" for x in text.split("。") if x}
+    all_sentences = [x + "。" for x in text.split("。") if x]
+    first, sentences = (all_sentences[0] if all_sentences else ""), set(all_sentences)
     quoted = [x + "。" for x in signal.evidence.split("。") if x.strip()]
     for q in quoted:
         if q not in sentences:
             raise ExtractionError(f"根拠「{q}」が日報の1文と一致しません")
+        if q == first:
+            raise ExtractionError("1文目はMRの行動の文なので、医師の評価の根拠にしないでください")
         if PATIENT.search(q):
             raise ExtractionError("根拠に患者の話題の文が含まれています")
     if signal.attitude != "記載なし" and not quoted:
@@ -95,7 +99,7 @@ def extract_one(client, model: str, text: str, retries: int = 2) -> DoctorSignal
             signal = DoctorSignal.model_validate_json(clean_json(resp.choices[0].message.content))
             check_evidence(signal, text)
             return signal
-        except (ValidationError, ExtractionError, json.JSONDecodeError) as e:
+        except (ValidationError, ExtractionError, json.JSONDecodeError, IndexError, AttributeError) as e:
             feedback = str(e)[:500]
         except APIError as e:  # 接続やサーバーの誤り：少し待って再試行する
             feedback = None

@@ -14,7 +14,8 @@ FAILED = "抽出失敗"
 
 
 def _multilabel_scores(gold: pd.Series, pred: pd.Series, empty: str) -> pd.DataFrame:
-    labels = sorted({x for v in gold for x in v.split("|")} - {empty})
+    # 予測にだけ出るラベルも含める（金のラベルにない誤検知を見落とさないため）
+    labels = sorted({x for v in pd.concat([gold, pred]) for x in v.split("|")} - {empty, FAILED})
     rows = []
     for lab in labels:
         g = gold.str.split("|").apply(lambda v: lab in v)

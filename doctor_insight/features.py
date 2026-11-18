@@ -101,12 +101,15 @@ def _other_product_traits(panel: pd.DataFrame, prior: float) -> pd.DataFrame:
     keys = ["doctor_id", "product", "q_index"]
     cols = ["n_reaction", "sum_adj"] + [f"n_b_{b}" for b in TRAIT_BARRIERS] + ["n_t_有効性"]
     own = panel[keys + [f"w_{c}" for c in cols]].rename(columns={f"w_{c}": c for c in cols})
+    # 窓に入っている四半期の数（発売直後や期間の始めは4より少ない）
+    own["n_q"] = (panel.groupby(["doctor_id", "product"]).cumcount() + 1).clip(upper=WINDOW).values
     # 同じ医師の全製品の窓の合計（四半期ごと）。発売前の製品は0として合計する
-    total = own.groupby(["doctor_id", "q_index"])[cols].sum().reset_index()
+    total = own.groupby(["doctor_id", "q_index"])[cols + ["n_q"]].sum().reset_index()
     m = own.merge(total, on=["doctor_id", "q_index"], suffixes=("", "_all"))
     out = m[keys].copy()
     n_other = m["n_reaction_all"] - m["n_reaction"]
-    out["other_n_reaction"] = n_other
+    # 件数は窓の長さと製品の数で増えるため、「製品×四半期あたり」の率にする
+    out["other_n_reaction"] = n_other / (m["n_q_all"] - m["n_q"]).replace(0, np.nan)
     out["other_att_mean"] = (m["sum_adj_all"] - m["sum_adj"] + PRIOR_K * prior) / (n_other + PRIOR_K)
     for b, name in TRAIT_BARRIERS.items():
         out[f"other_{name}"] = (m[f"n_b_{b}_all"] - m[f"n_b_{b}"]) / (n_other + 1)

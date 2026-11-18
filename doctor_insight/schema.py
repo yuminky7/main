@@ -6,7 +6,7 @@ LLMによる抽出、ルールによる抽出、人手のラベルのすべて�
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Topic = Literal["有効性", "安全性", "使用感", "投与方法", "薬価・患者負担", "競合品", "その他"]
 Attitude = Literal["肯定的", "中立", "否定的", "記載なし"]
@@ -32,6 +32,9 @@ STAGE_ORDER = {"認知": 0, "関心": 1, "試用": 2, "継続": 3}
 
 class DoctorSignal(BaseModel):
     """日報1件・製品1つについて、医師の評価とネックを表す。"""
+
+    # JSONスキーマに additionalProperties: false を出す（strict な構造化出力の要件）
+    model_config = ConfigDict(extra="forbid")
 
     topics: list[Topic] = Field(description="日報で話題になったこと。複数可")
     attitude: Attitude = Field(

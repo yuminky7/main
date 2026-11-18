@@ -121,7 +121,9 @@ def main() -> None:
 
     # 6. 予測②：新製品Cで、日報上の段階が上がるか（練習用） ----------------------
     # 次の四半期に段階が書かれた行だけを使う（古い段階が書き直されただけの「上昇」を減らすため）
-    c = panel[(panel["product"] == "C") & panel["stage_obs"].notna() & (panel["stage_mentioned_next"] == 1)]
+    # その四半期にも段階が書かれた行に限る（古い段階を引き継いだだけの行を除く）
+    c = panel[(panel["product"] == "C") & panel["stage_obs"].notna() & (panel["stage_mentioned_next"] == 1)
+              & (panel["stage_age"] == 0)]
     res_c = compare_feature_sets(c, "y_stage_up_obs", sets, FIT_UNTIL_Q, TEST_FROM_Q)
     rep += ["## 4. 予測：新製品Cで、次の四半期に日報上の段階が上がるか（練習用）", "",
             "日報上の段階は、説明変数も結果も同じMRの記述。予測できても、MRの書き方を予測しているだけかもしれない。"

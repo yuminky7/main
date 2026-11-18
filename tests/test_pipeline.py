@@ -49,12 +49,11 @@ def test_evidence_excludes_patient_sentences():
 
 
 def test_schema_rejects_inconsistent_labels():
-    with pytest.raises(Exception):
-        DoctorSignal(topics=["有効性"], attitude="とても良い", stage="試用", barriers=["なし"], mentions_patient=False, evidence="")
-    with pytest.raises(Exception):
-        DoctorSignal(topics=["有効性"], attitude="中立", stage="試用", barriers=["なし", "患者負担"], mentions_patient=False, evidence="")
-    with pytest.raises(Exception):
-        DoctorSignal(topics=[], attitude="中立", stage="試用", barriers=["なし"], mentions_patient=False, evidence="")
+    base = dict(topics=["有効性"], attitude="中立", stage="試用", barriers=["なし"], mentions_patient=False, evidence="")
+    DoctorSignal(**base)  # 正しい組み合わせは通る
+    for bad in [{"attitude": "とても良い"}, {"barriers": ["なし", "患者負担"]}, {"topics": []}, {"extra": 1}]:
+        with pytest.raises(Exception):
+            DoctorSignal(**{**base, **bad})
 
 
 def test_llm_evidence_check():
@@ -62,7 +61,8 @@ def test_llm_evidence_check():
     ok = DoctorSignal(topics=["安全性"], attitude="否定的", stage="記載なし", barriers=["なし"],
                       mentions_patient=True, evidence="安全性が気になるとのこと。")
     check_evidence(ok, text)
-    for bad in ["製品", "70代の患者さんで改善が見られたとのこと。", "安全性が心配とのこと。"]:
+    for bad in ["製品", "70代の患者さんで改善が見られたとのこと。", "安全性が心配とのこと。",
+                "製品Aの安全性について説明。"]:
         with pytest.raises(ExtractionError):
             check_evidence(ok.model_copy(update={"evidence": bad}), text)
     assert clean_json('<think>考え中</think>```json\n{"a": 1}\n```') == '{"a": 1}'

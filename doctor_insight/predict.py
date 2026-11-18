@@ -46,8 +46,13 @@ def _bootstrap_auc_diff(doctors: np.ndarray, y: np.ndarray, p: np.ndarray, p0: n
 
 
 def compare_feature_sets(df: pd.DataFrame, target: str, feature_sets: dict[str, list[str]],
-                         fit_until_q: int, test_from_q: int) -> pd.DataFrame:
-    train = df[df["q_index"] <= fit_until_q]
+                         fit_until_q: int, test_from_q: int, fit_from_q: int = 3) -> pd.DataFrame:
+    """fit_from_q より前の四半期は、直近4四半期の窓が埋まっていないため学習に使わない。
+
+    AUCの区間は評価用の行だけを医師単位で再標本化したもので、モデルの学習し直しは含まない。
+    そのため、不確かさを小さめに見積もる。
+    """
+    train = df[(df["q_index"] >= fit_from_q) & (df["q_index"] <= fit_until_q)]
     test = df[df["q_index"] >= test_from_q]
     y = test[target].astype(int).values
     docs = test["doctor_id"].values
@@ -71,8 +76,8 @@ def compare_feature_sets(df: pd.DataFrame, target: str, feature_sets: dict[str, 
     return pd.DataFrame(rows)
 
 
-def fit_full(df: pd.DataFrame, target: str, cols: list[str], fit_until_q: int):
-    train = df[df["q_index"] <= fit_until_q]
+def fit_full(df: pd.DataFrame, target: str, cols: list[str], fit_until_q: int, fit_from_q: int = 3):
+    train = df[(df["q_index"] >= fit_from_q) & (df["q_index"] <= fit_until_q)]
     return _model().fit(train[cols], train[target].astype(int))
 
 
