@@ -71,7 +71,18 @@ STAGE_SENTENCE = {
     "関心": ["興味を示された", "使ってみたいとのこと"],
     "試用": ["数例で使い始めたとのこと", "初めて処方いただいた"],
     "継続": ["継続して処方いただいている", "第一選択として使っているとのこと"],
+    "中止": ["使用を中止したとのこと", "今は処方を控えているとのこと"],
 }
+
+# 否定的な反応の文のうち、ネックそのものを述べているもの（人手のラベルでもネックとして数える）
+REACTION_BARRIER = {
+    ("否定的", "薬価・患者負担"): "患者負担",
+    ("否定的", "投与方法"): "投与の手間",
+    ("否定的", "競合品"): "競合品で十分",
+}
+
+# エビデンスを重視する医師ほど、日報に書かれやすい文
+EVIDENCE_SEEKING_SENTENCE = ["論文のデータを詳しく質問された", "エビデンスの根拠を求められた"]
 
 PATIENT_SENTENCE = ["70代の患者さんで改善が見られたとのこと", "若い患者さんから相談があったとのこと"]
 
@@ -177,7 +188,8 @@ def simulate(n_doctors: int = 400, n_mrs: int = 40, seed: int = 0) -> SimData:
                     continue
                 mr = d.mr_first if qi < d.mr_change_q else d.mr_second
                 stage_before = "中止" if stopped else STAGES[stage]
-                # 説明会への参加：新薬を早く採用する医師、関心のある医師ほど参加しやすい（交絡）
+                # 説明会への参加：新薬を早く採用する医師ほど参加しやすく、段階も上がりやすい（交絡）。
+                # 関心以上の段階も参加を増やすが、この架空データでは段階そのものは次の段階に影響しない
                 p_seminar = _sigmoid(-1.8 + 2.0 * d.early_adopter + 0.6 * (stage >= 1))
                 seminar = bool(rng.random() < p_seminar) and not stopped
                 n_visits = int(rng.poisson(1.6 + 0.6 * (d.facility_type == "病院")))
@@ -199,7 +211,7 @@ def simulate(n_doctors: int = 400, n_mrs: int = 40, seed: int = 0) -> SimData:
                         _write_report(
                             rng, report_id, d.doctor_id, d.facility_id, mr, p, pname, q, qi,
                             stage_before, true_att, active_barrier, seminar,
-                            mr_positivity[mr], mr_verbosity[mr],
+                            mr_positivity[mr], mr_verbosity[mr], d.evidence,
                         )
                     )
 
@@ -247,11 +259,13 @@ def simulate(n_doctors: int = 400, n_mrs: int = 40, seed: int = 0) -> SimData:
     return SimData(doctors, reports, states, sales, registrations, true_effect)
 
 
-def _write_report(rng, rid, doctor_id, facility_id, mr, p, pname, q, qi, stage, true_att, barrier, seminar, positivity, verbosity):
+def _write_report(rng, rid, doctor_id, facility_id, mr, p, pname, q, qi, stage, true_att, barrier, seminar, positivity, verbosity, evidence_trait):
     """日報1件の文と、その文に書かれている内容の答え（人手のラベルに相当）を作る。"""
-    # 話題：ネックがあれば半分はネックに関係する話題
+    # 話題：ネックがあれば半分はネックに関係する話題。エビデンスを重視する医師ほど有効性の話題が増える
     if barrier and rng.random() < 0.5:
         topic = BARRIER_TOPIC[barrier]
+    elif rng.random() < 0.4 * evidence_trait:
+        topic = "有効性"
     else:
         choices = ["有効性", "安全性", "使用感", "薬価・患者負担", "競合品"] + (["投与方法"] if p == "A" else [])
         topic = choices[rng.integers(len(choices))]
@@ -272,11 +286,19 @@ def _write_report(rng, rid, doctor_id, facility_id, mr, p, pname, q, qi, stage, 
         sentences.append(s)
         evidence.append(s)
         label["attitude"] = written
+        if (written, topic) in REACTION_BARRIER:
+            label["barriers"] = [REACTION_BARRIER[(written, topic)]]
+        if rng.random() < 0.6 * evidence_trait:
+            e = EVIDENCE_SEEKING_SENTENCE[rng.integers(len(EVIDENCE_SEEKING_SENTENCE))] + "。"
+            sentences.append(e)
+            evidence.append(e)
+            if "有効性" not in label["topics"]:
+                label["topics"].append("有効性")
         if barrier and written != "肯定的" and rng.random() < 0.7:
             b = BARRIER_SENTENCE[barrier][rng.integers(len(BARRIER_SENTENCE[barrier]))] + "。"
             sentences.append(b)
             evidence.append(b)
-            label["barriers"] = [barrier]
+            label["barriers"] = sorted({barrier} | (set(label["barriers"]) - {"なし"}))
             if BARRIER_TOPIC[barrier] not in label["topics"]:
                 label["topics"].append(BARRIER_TOPIC[barrier])
         if stage in STAGE_SENTENCE and rng.random() < 0.5:

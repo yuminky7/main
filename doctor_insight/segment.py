@@ -29,14 +29,18 @@ def cluster_doctors(panel_q: pd.DataFrame, cols: list[str], k: int = 5, seed: in
     Z = StandardScaler().fit_transform(X)
     km = KMeans(n_clusters=k, n_init=10, random_state=seed).fit(Z)
     labels = pd.Series(km.labels_, index=panel_q.index, name="cluster")
-    profile = X.groupby(labels).mean().round(2)
+    means = X.groupby(labels).mean()
+    # 「高・低」は、クラスタの平均どうしではなく、医師全体の平均と標準偏差を基準にする
+    z = (means - X.mean()) / (X.std() + 1e-9)
+    profile = means.round(2)
     profile.insert(0, "n", labels.value_counts().sort_index())
+    profile.attrs["z"] = z
     return labels, profile
 
 
 def describe_clusters(profile: pd.DataFrame) -> pd.Series:
-    """各クラスタの特徴を、全体平均から最も離れた特徴量3つで言葉にする。"""
-    z = (profile.drop(columns="n") - profile.drop(columns="n").mean()) / (profile.drop(columns="n").std() + 1e-9)
+    """各クラスタの特徴を、医師全体の平均から最も離れた特徴量3つで言葉にする。"""
+    z = profile.attrs["z"]
     names = {}
     for c, row in z.iterrows():
         top = row.abs().sort_values(ascending=False).index[:3]

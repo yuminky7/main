@@ -20,7 +20,12 @@ TRAIT_BARRIERS = {"安全性への懸念": "safety", "エビデンス不足": "e
 
 
 def mr_offsets(ext: pd.DataFrame, until_q: int, k: float = 20.0) -> pd.Series:
-    """MRごとの「好意的に書く傾向」。学習期間の日報だけで計算する。"""
+    """MRごとの「好意的に書く傾向」。学習期間の日報だけで計算する。
+
+    簡易版：MRごとの平均と全体の平均の差を縮めて引くだけ。MRの担当は無作為ではないため、
+    担当する医師の違いも一部吸収してしまう（架空データでは補正の効果は小さかった）。
+    実データでは、医師とMRの交差ランダム効果モデルに置き換えることを勧める（設計書を参照）。
+    """
     d = ext[(ext["q_index"] <= until_q) & ext["score"].notna()]
     g = d.groupby("mr_id")["score"].agg(["mean", "count"])
     overall = d["score"].mean()
@@ -56,7 +61,7 @@ def build_panel(reports: pd.DataFrame, extracted: pd.DataFrame, grid: pd.DataFra
     count_cols = [c for c in agg.columns if c.startswith("n_") or c == "sum_adj"]
     panel[count_cols] = panel[count_cols].fillna(0)
 
-    # 直近4四半期の合計
+    # 直近4四半期の合計。grid は四半期が欠けずに並んでいる前提（行の数で窓を数えるため）
     g = panel.groupby(["doctor_id", "product"], sort=False)
     win = g[count_cols].rolling(WINDOW, min_periods=1).sum().reset_index(level=[0, 1], drop=True)
     panel[[f"w_{c}" for c in count_cols]] = win[count_cols].values
@@ -72,9 +77,13 @@ def build_panel(reports: pd.DataFrame, extracted: pd.DataFrame, grid: pd.DataFra
         panel[f"topic_{t}"] = panel[f"w_n_t_{t}"] / (panel["w_n_reaction"] + 1)
     # 日報で最後に分かった処方の段階（過去から引き継ぐ）
     panel["stage_obs"] = g["stage_last"].ffill()
+    panel["stage_mentioned"] = panel["stage_last"].notna().astype(int)
+    # 段階がどれだけ前に書かれたものか（古い段階を引き継いでいるだけの行を見分けるため）
+    panel["stage_age"] = _quarters_since(panel, "stage_mentioned")
     panel["quarters_since_reaction"] = _quarters_since(panel, "n_reaction")
 
-    panel = panel.merge(_other_product_traits(panel), on=keys, how="left")
+    global_prior = float(ext.loc[ext["q_index"] <= train_until_q, "adj_score"].mean())
+    panel = panel.merge(_other_product_traits(panel, global_prior), on=keys, how="left")
     return panel
 
 
@@ -84,22 +93,21 @@ def _quarters_since(panel: pd.DataFrame, col: str) -> pd.Series:
     return panel["q_index"] - last
 
 
-def _other_product_traits(panel: pd.DataFrame) -> pd.DataFrame:
-    """同じ医師の、他の自社品の日報から作る特性。その四半期までの累積。"""
+def _other_product_traits(panel: pd.DataFrame, prior: float) -> pd.DataFrame:
+    """同じ医師の、他の自社品の日報から作る特性。対象の製品と同じく直近4四半期の窓で作る。
+
+    累積にすると、件数が時間とともに増え続け、学習期間と評価期間で値の分布がずれる。
+    """
     keys = ["doctor_id", "product", "q_index"]
     cols = ["n_reaction", "sum_adj"] + [f"n_b_{b}" for b in TRAIT_BARRIERS] + ["n_t_有効性"]
-    own = panel[keys + cols].copy()
-    own[cols] = own.groupby(["doctor_id", "product"])[cols].cumsum()
-    # 同じ医師の全製品の累積（四半期ごと）。製品によって発売時期が違うので、四半期を揃えてから合計する
-    wide = own.pivot_table(index=["doctor_id", "q_index"], columns="product", values=cols, aggfunc="sum")
-    wide = wide.groupby(level=0).ffill().fillna(0)
-    total = wide.T.groupby(level=0).sum().T  # 列＝cols
-    total = total.reset_index()
+    own = panel[keys + [f"w_{c}" for c in cols]].rename(columns={f"w_{c}": c for c in cols})
+    # 同じ医師の全製品の窓の合計（四半期ごと）。発売前の製品は0として合計する
+    total = own.groupby(["doctor_id", "q_index"])[cols].sum().reset_index()
     m = own.merge(total, on=["doctor_id", "q_index"], suffixes=("", "_all"))
     out = m[keys].copy()
     n_other = m["n_reaction_all"] - m["n_reaction"]
     out["other_n_reaction"] = n_other
-    out["other_att_mean"] = (m["sum_adj_all"] - m["sum_adj"]) / (n_other + PRIOR_K)
+    out["other_att_mean"] = (m["sum_adj_all"] - m["sum_adj"] + PRIOR_K * prior) / (n_other + PRIOR_K)
     for b, name in TRAIT_BARRIERS.items():
         out[f"other_{name}"] = (m[f"n_b_{b}_all"] - m[f"n_b_{b}"]) / (n_other + 1)
     out["other_efficacy_focus"] = (m["n_t_有効性_all"] - m["n_t_有効性"]) / (n_other + 1)
@@ -107,7 +115,7 @@ def _other_product_traits(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 FEATURES_TEXT = (
-    ["att_mean", "reaction_rate", "stage_obs", "quarters_since_reaction"]
+    ["att_mean", "reaction_rate", "stage_obs", "stage_age", "quarters_since_reaction"]
     + [f"barrier_{b}" for b in BARRIERS[:-1]]
     + [f"topic_{t}" for t in TOPICS]
 )

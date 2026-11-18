@@ -6,7 +6,7 @@ LLMによる抽出、ルールによる抽出、人手のラベルのすべて�
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Topic = Literal["有効性", "安全性", "使用感", "投与方法", "薬価・患者負担", "競合品", "その他"]
 Attitude = Literal["肯定的", "中立", "否定的", "記載なし"]
@@ -41,3 +41,13 @@ class DoctorSignal(BaseModel):
     barriers: list[Barrier] = Field(description="処方のネック。なければ「なし」のみ")
     mentions_patient: bool = Field(description="患者の話題が含まれるか")
     evidence: str = Field(description="判断の根拠にした日報の文。原文のまま引用する")
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "DoctorSignal":
+        if not self.topics:
+            raise ValueError("topics must not be empty")
+        if not self.barriers:
+            raise ValueError("barriers must not be empty (use 「なし」)")
+        if "なし" in self.barriers and len(self.barriers) > 1:
+            raise ValueError("「なし」 must appear alone in barriers")
+        return self
