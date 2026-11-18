@@ -1,0 +1,10 @@
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+pydantic>=2.7
+lightgbm>=4.3
+tabulate>=0.9
+# 社内のLLMで抽出する場合のみ
+openai>=1.40
+# テスト
+pytest>=8.0
